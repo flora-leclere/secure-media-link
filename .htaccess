@@ -1,0 +1,314 @@
+# Secure Media Link - Règles de réécriture et sécurité
+# Version: 1.0.0
+# Ne pas modifier manuellement - Géré automatiquement par le plugin
+
+# BEGIN Secure Media Link
+
+# ============================================================================
+# RÈGLES DE RÉÉCRITURE POUR LIENS SÉCURISÉS
+# ============================================================================
+
+# Activer le moteur de réécriture
+RewriteEngine On
+
+# Règle principale pour les liens sécurisés
+# Format: /sml/media/{media_id}/{format_id}/{hash}?Expires={timestamp}&Signature={signature}&Key-Pair-Id={key_id}
+RewriteRule ^sml/media/([0-9]+)/([0-9]+)/([a-f0-9]{64})/?$ /wp-content/plugins/secure-media-link/handler/secure-media-handler.php?media_id=$1&format_id=$2&link_hash=$3 [QSA,L]
+
+# Règle alternative pour domaine personnalisé
+# Si un domaine personnalisé est configuré, rediriger vers le handler
+RewriteCond %{HTTP_HOST} ^media\.example\.com$ [NC]
+RewriteRule ^media/([0-9]+)/([0-9]+)/([a-f0-9]{64})/?$ /wp-content/plugins/secure-media-link/handler/secure-media-handler.php?media_id=$1&format_id=$2&link_hash=$3 [QSA,L]
+
+# Règle pour l'API REST personnalisée
+RewriteRule ^sml-api/(.*)$ /wp-json/sml/v1/$1 [QSA,L]
+
+# ============================================================================
+# PROTECTION DES RÉPERTOIRES SENSIBLES
+# ============================================================================
+
+# Protéger le répertoire des clés et configurations
+<Files "sml-keys.json">
+    Order Deny,Allow
+    Deny from all
+</Files>
+
+# Protéger les fichiers de configuration
+<FilesMatch "\.(conf|config|cfg|ini)$">
+    Order Deny,Allow
+    Deny from all
+</FilesMatch>
+
+# Protéger les fichiers de log
+<FilesMatch "\.(log|logs)$">
+    Order Deny,Allow
+    Deny from all
+</FilesMatch>
+
+# Protéger les fichiers de sauvegarde
+<FilesMatch "\.(bak|backup|old|tmp)$">
+    Order Deny,Allow
+    Deny from all
+</FilesMatch>
+
+# ============================================================================
+# SÉCURITÉ ANTI-HOTLINKING
+# ============================================================================
+
+# Empêcher le hotlinking des médias protégés
+RewriteCond %{HTTP_REFERER} !^$
+RewriteCond %{HTTP_REFERER} !^https?://(www\.)?example\.com [NC]
+RewriteCond %{HTTP_REFERER} !^https?://(www\.)?media\.example\.com [NC]
+RewriteCond %{REQUEST_URI} \.(jpg|jpeg|png|gif|webp|pdf|doc|docx|zip)$ [NC]
+RewriteCond %{REQUEST_URI} /wp-content/uploads/sml-formats/ [NC]
+RewriteRule \.(jpg|jpeg|png|gif|webp|pdf|doc|docx|zip)$ /wp-content/plugins/secure-media-link/assets/images/hotlink-blocked.jpg [R=403,L]
+
+# ============================================================================
+# HEADERS DE SÉCURITÉ
+# ============================================================================
+
+# Headers de sécurité pour les médias sécurisés
+<FilesMatch "\.(jpg|jpeg|png|gif|webp|pdf|doc|docx|zip)$">
+    # Empêcher la mise en cache par les proxies
+    Header set Cache-Control "private, no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+    
+    # Headers de sécurité
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "DENY"
+    Header set X-XSS-Protection "1; mode=block"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+    
+    # CSP pour les médias
+    Header set Content-Security-Policy "default-src 'none'; img-src 'self'; object-src 'none';"
+</FilesMatch>
+
+# ============================================================================
+# OPTIMISATION DES PERFORMANCES
+# ============================================================================
+
+# Compression GZIP pour les réponses JSON de l'API
+<IfModule mod_deflate.c>
+    <FilesMatch "\.(json|js|css)$">
+        SetOutputFilter DEFLATE
+    </FilesMatch>
+</IfModule>
+
+# Cache des assets statiques du plugin
+<FilesMatch "\.(css|js|png|jpg|jpeg|gif|ico|svg)$">
+    <IfModule mod_expires.c>
+        ExpiresActive On
+        ExpiresDefault "access plus 1 month"
+    </IfModule>
+    
+    <IfModule mod_headers.c>
+        Header append Cache-Control "public"
+    </IfModule>
+</FilesMatch>
+
+# ============================================================================
+# LIMITATION DE TAUX (RATE LIMITING)
+# ============================================================================
+
+# Limitation basique des requêtes API (nécessite mod_evasive ou mod_security)
+<IfModule mod_evasive24.c>
+    DOSHashTableSize    3097
+    DOSPageCount        5
+    DOSSiteCount        100
+    DOSPageInterval     1
+    DOSSiteInterval     1
+    DOSBlockingPeriod   600
+    DOSLogDir           "/var/log/mod_evasive"
+    DOSEmailNotify      admin@example.com
+    DOSWhitelist        127.0.0.1
+    DOSWhitelist        192.168.1.*
+</IfModule>
+
+# ============================================================================
+# PROTECTION CONTRE LES ATTAQUES
+# ============================================================================
+
+# Bloquer les user agents suspects
+RewriteCond %{HTTP_USER_AGENT} ^$ [OR]
+RewriteCond %{HTTP_USER_AGENT} "curl|wget|python|perl|java|go-http|libwww" [NC,OR]
+RewriteCond %{HTTP_USER_AGENT} "scanner|crawl|spider|bot|scraper" [NC]
+RewriteCond %{REQUEST_URI} ^/sml/ [NC]
+RewriteRule .* - [F,L]
+
+# Bloquer les tentatives d'injection SQL dans les paramètres
+RewriteCond %{QUERY_STRING} "union.*select|insert.*into|delete.*from|drop.*table" [NC]
+RewriteRule .* - [F,L]
+
+# Bloquer les tentatives XSS
+RewriteCond %{QUERY_STRING} "<script|javascript:|vbscript:|onload=|onerror=" [NC]
+RewriteRule .* - [F,L]
+
+# Bloquer les tentatives d'inclusion de fichiers
+RewriteCond %{QUERY_STRING} "\.\./|boot\.ini|etc/passwd|proc/self/environ" [NC]
+RewriteRule .* - [F,L]
+
+# ============================================================================
+# GESTION DES ERREURS PERSONNALISÉES
+# ============================================================================
+
+# Pages d'erreur personnalisées pour les médias sécurisés
+ErrorDocument 403 /wp-content/plugins/secure-media-link/templates/error-403.php
+ErrorDocument 404 /wp-content/plugins/secure-media-link/templates/error-404.php
+ErrorDocument 410 /wp-content/plugins/secure-media-link/templates/error-410.php
+
+# ============================================================================
+# CONFIGURATION MIME TYPES
+# ============================================================================
+
+# Types MIME pour les formats supportés
+<IfModule mod_mime.c>
+    AddType image/webp .webp
+    AddType application/json .json
+    AddType application/jwt .jwt
+</IfModule>
+
+# ============================================================================
+# CORS POUR L'API
+# ============================================================================
+
+# Headers CORS pour l'API REST
+<IfModule mod_headers.c>
+    # Préflight requests
+    RewriteCond %{REQUEST_METHOD} OPTIONS
+    RewriteCond %{REQUEST_URI} ^/wp-json/sml/
+    RewriteRule ^(.*)$ $1 [R=200,L]
+    
+    # CORS headers pour les réponses API
+    <LocationMatch "^/wp-json/sml/">
+        Header always set Access-Control-Allow-Origin "*"
+        Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+        Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With, X-API-Key"
+        Header always set Access-Control-Max-Age "86400"
+    </LocationMatch>
+</IfModule>
+
+# ============================================================================
+# LOGGING ET MONITORING
+# ============================================================================
+
+# Log des accès aux médias sécurisés (optionnel)
+<IfModule mod_log_config.c>
+    LogFormat "%h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\" %D" sml_combined
+    CustomLog logs/sml_access.log sml_combined env=sml_request
+    
+    # Marquer les requêtes SML pour le logging
+    SetEnvIf Request_URI "^/sml/" sml_request
+</IfModule>
+
+# ============================================================================
+# REDIRECTION HTTPS (optionnel)
+# ============================================================================
+
+# Forcer HTTPS pour les liens sécurisés
+<IfModule mod_rewrite.c>
+    RewriteCond %{HTTPS} off
+    RewriteCond %{REQUEST_URI} ^/sml/ [NC]
+    RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+</IfModule>
+
+# ============================================================================
+# CONFIGURATION SPÉCIFIQUE PAR ENVIRONNEMENT
+# ============================================================================
+
+# Développement - Headers de debug (à supprimer en production)
+<IfModule mod_setenvif.c>
+    SetEnvIf Host "localhost|dev\.|staging\." development
+    
+    <IfModule mod_headers.c>
+        Header set X-SML-Environment "development" env=development
+        Header set X-SML-Debug "enabled" env=development
+    </IfModule>
+</IfModule>
+
+# Production - Headers de sécurité renforcés
+<IfModule mod_setenvif.c>
+    SetEnvIfNoCase Host "^(?!localhost|dev\.|staging\.)" production
+    
+    <IfModule mod_headers.c>
+        Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" env=production
+        Header always set X-Content-Type-Options "nosniff" env=production
+        Header always set X-Frame-Options "DENY" env=production
+        Header always set X-XSS-Protection "1; mode=block" env=production
+    </IfModule>
+</IfModule>
+
+# ============================================================================
+# MAINTENANCE ET MONITORING
+# ============================================================================
+
+# Page de maintenance pour les médias sécurisés
+<IfModule mod_rewrite.c>
+    # Vérifier si le fichier de maintenance existe
+    RewriteCond %{DOCUMENT_ROOT}/wp-content/plugins/secure-media-link/maintenance.flag -f
+    RewriteCond %{REQUEST_URI} ^/sml/ [NC]
+    RewriteCond %{REMOTE_ADDR} !^127\.0\.0\.1$ [NC]
+    RewriteCond %{REMOTE_ADDR} !^192\.168\. [NC]
+    RewriteRule ^(.*)$ /wp-content/plugins/secure-media-link/templates/maintenance.html [R=503,L]
+</IfModule>
+
+# Health check endpoint
+RewriteRule ^sml/health/?$ /wp-content/plugins/secure-media-link/handler/health-check.php [L]
+
+# ============================================================================
+# OPTIMISATIONS SPÉCIFIQUES
+# ============================================================================
+
+# Désactiver les logs d'accès pour les petites images (favicons, etc.)
+<FilesMatch "\.(ico|favicon)$">
+    <IfModule mod_log_config.c>
+        SetEnv dontlog
+    </IfModule>
+</FilesMatch>
+
+# Compresser les réponses de l'API
+<Location "/wp-json/sml/">
+    <IfModule mod_deflate.c>
+        SetOutputFilter DEFLATE
+        SetEnvIfNoCase Request_URI \.(?:gif|jpe?g|png)$ no-gzip dont-vary
+        SetEnvIfNoCase Request_URI \.(?:exe|t?gz|zip|bz2|sit|rar)$ no-gzip dont-vary
+    </IfModule>
+</Location>
+
+# ============================================================================
+# CONFIGURATION DE FALLBACK
+# ============================================================================
+
+# Si mod_rewrite n'est pas disponible, redirection simple
+<IfModule !mod_rewrite.c>
+    RedirectMatch 301 ^/sml/(.*)$ /wp-content/plugins/secure-media-link/handler/fallback-handler.php?path=$1
+</IfModule>
+
+# END Secure Media Link
+
+# ============================================================================
+# NOTES D'ADMINISTRATION
+# ============================================================================
+
+# IMPORTANT: 
+# - Ces règles sont automatiquement gérées par le plugin Secure Media Link
+# - Ne modifiez pas manuellement les règles entre "BEGIN" et "END"
+# - Pour des configurations personnalisées, ajoutez vos règles en dehors de ces marqueurs
+# - En cas de problème, désactivez/réactivez le plugin pour régénérer les règles
+# - Testez toujours les modifications sur un environnement de staging
+
+# PERFORMANCE:
+# - Les règles sont optimisées pour minimiser l'impact sur les performances
+# - Le cache des assets statiques améliore les temps de chargement
+# - La compression GZIP réduit la bande passante
+
+# SÉCURITÉ:
+# - Protection multi-niveaux contre les attaques courantes
+# - Headers de sécurité conformes aux standards OWASP
+# - Limitation de taux pour prévenir les abus
+# - Logging détaillé pour le monitoring
+
+# MAINTENANCE:
+# - Le fichier maintenance.flag active le mode maintenance
+# - Le endpoint /sml/health permet le monitoring
+# - Les logs sont séparés pour faciliter l'analyse
